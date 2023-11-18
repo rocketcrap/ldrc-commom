@@ -188,6 +188,8 @@ class DataThing {
       /**
        * @brief read underlying data
        *
+       * note that fn will called with thing rlocked. fn that calls write operation on class will result in deadlock
+       *
        * @param fn a function to be called with const reference to data
        * @param args additional arguments to be call function with
        */
@@ -197,12 +199,26 @@ class DataThing {
          lock.RUnlock();
       }
 
+      /**
+       * @brief access data w/ read/write reference
+       *
+       * @param fn callback with write access to data.
+       * @param args arg to pass to fn
+       */
+      void accessData(void(fn)(T &data, void *args), void *args) {
+         lock.Lock();
+         fn(data, args);
+         lock.UnLock();
+         callCallbacks();
+      }
+
    protected:
       /**
        * @brief call this method to call callbacks registered with registerCallback()
        *
        */
       virtual void callCallbacks() {
+         onUpdate(); // invoke hook if defined
          lock.RLock();
          auto n = numCallbacks;
          lock.RUnlock();
@@ -210,10 +226,16 @@ class DataThing {
          for (auto i = 0; i < n; i++) {
             lock.RLock();
             callback cb = callbacks[i];
-            cb.fn(data, cb.args);
             lock.RUnlock();
+            cb.fn(data, cb.args);
          }
       }
+
+      /**
+       * @brief You can override this function to have an internal hook prior to calling the callbacks
+       *
+       */
+      virtual void onUpdate() {}
 
       /**
        * @brief The actual data itself
@@ -287,7 +309,7 @@ private:
    Spec* specs;
 
    Spec* findSpecBySubsystem(BaseSubsystem *needle);
-   void descendAndStartOrSetup(Spec *spec, BaseSubsystem::Status desiredState);
+   void descendAndStartOrSetup(Spec *spec, BaseSubsystem::Status desiredState, int depth=0);
 };
 
 extern SubsystemManagerClass SubsystemManager;

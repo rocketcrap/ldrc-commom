@@ -99,6 +99,24 @@ void SubsystemManagerClass::addSubsystem(Spec *spec) {
 
 BaseSubsystem::Status SubsystemManagerClass::setup() {
     auto spec = specs;
+
+    #ifdef MANAGER_DEBUG
+    Serial.println("in setup, specs dump:");
+    while (spec != NULL && spec->subsystem != NULL) {
+        Serial.printf("'%s' depends on (", spec->subsystem->name);
+        for (auto i = 0; spec && spec->deps && spec->deps[i]; i++) {
+            auto s = spec->deps[i];
+            if (s && s->name) {
+                Serial.printf("'%s', ", s->name);
+            }
+        }
+        Serial.println(")");
+        spec = spec->next;
+    }
+    spec = specs;
+    Serial.println();
+    #endif
+
     while (spec != NULL && spec->subsystem != NULL) {
         descendAndStartOrSetup(spec, READY);
         spec = spec->next;
@@ -129,28 +147,39 @@ SubsystemManagerClass::Spec* SubsystemManagerClass::findSpecBySubsystem(BaseSubs
     return NULL;
 }
 
-void SubsystemManagerClass::descendAndStartOrSetup(Spec *spec, BaseSubsystem::Status desiredState) {
-    if (spec == NULL || spec->subsystem == NULL) {
+void SubsystemManagerClass::descendAndStartOrSetup(Spec *spec, BaseSubsystem::Status desiredState, int depth) {
+    if (specs == NULL || spec == NULL || spec->subsystem == NULL) {
         return;
     }
-    auto subsystem = spec->subsystem;
-    auto name = subsystem->name;
-    auto status = subsystem->getStatus();
+    const auto subsystem = spec->subsystem;
+    const auto name = subsystem->name;
 
-    if ((desiredState == READY && status != INIT) ||
-        (desiredState == RUNNING && status != READY)) {
-        return;
+    auto deps = spec->deps;
+    for (auto i = 0; deps && deps[i] && depth < 8; i++) {
+        const auto s = findSpecBySubsystem(deps[i]);
+        descendAndStartOrSetup(s, desiredState, depth++);
     }
-    auto deps = specs->deps;
-    for (auto i = 0; deps[i]!=NULL; i++) {
-        auto spec = findSpecBySubsystem(deps[i]);
-        descendAndStartOrSetup(spec, desiredState);
+    const auto status = subsystem->getStatus();
+    if ((status == desiredState) || (status == FAULT || status == STOPPED))  {
+        return;
     }
     if (desiredState == READY && status == INIT) {
+        #ifdef MANAGER_DEBUG
+        Serial.printf("setup subsystem '%s' (status: %d) -> ", subsystem->name, status);
+        auto newstatus = subsystem->setup();
+        Serial.printf(" (status: %d)\n", newstatus);
+        #else
         subsystem->setup();
+        #endif
     }
     if (desiredState == RUNNING && status == READY) {
+        #ifdef MANAGER_DEBUG
+        Serial.printf("start subsystem '%s' (status: %d) -> ", subsystem->name, status);
+        auto newstatus = subsystem->start();
+        Serial.printf(" (status: %d)\n", newstatus);
+        #else
         subsystem->start();
+        #endif
     }
 }
 
